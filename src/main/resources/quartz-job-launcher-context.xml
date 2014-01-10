@@ -1,0 +1,61 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<beans xmlns="http://www.springframework.org/schema/beans" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+	xmlns:aop="http://www.springframework.org/schema/aop"
+	xsi:schemaLocation="http://www.springframework.org/schema/beans 
+       	http://www.springframework.org/schema/beans/spring-beans-2.0.xsd
+       	http://www.springframework.org/schema/aop
+ 		http://www.springframework.org/schema/aop/spring-aop-2.0.xsd">
+
+	<import resource="classpath:launch-context.xml" />
+
+	<bean class="org.springframework.scheduling.quartz.SchedulerFactoryBean">
+		<property name="triggers">
+			<list>
+      	<ref bean="cronTrigger" /> 
+      	<ref bean="outboundCronTrigger" />
+      </list>	
+		</property>
+	</bean>
+
+	<bean id="jobDetail" class="org.springframework.scheduling.quartz.JobDetailBean">
+		<property name="jobClass" value="com.hliang.eod.quartz.JobLauncherDetails" />
+		<property name="group" value="quartz-batch" />
+		<property name="jobDataAsMap">
+			<map>
+			  <entry key="canRun" value="${batch.can.run}"/>
+				<entry key="jobName" value="${batch.job.name}"/>
+				<entry key="jobLocator" value-ref="jobRegistry"/>
+				<entry key="jobLauncher" value-ref="jobLauncher"/>
+			</map>
+		</property>
+	</bean>
+	
+	<bean id="ouboundJobDetail" class="org.springframework.scheduling.quartz.JobDetailBean">
+		<property name="jobClass" value="com.hliang.eod.quartz.JobLauncherDetails" />
+		<property name="group" value="quartz-batch" />
+		<property name="jobDataAsMap">
+			<map>
+			  <entry key="canRun" value="${batch.can.run}"/>
+				<entry key="jobName" value="${batch.outbound.job.name}"/>
+				<entry key="jobLocator" value-ref="jobRegistry"/>
+				<entry key="jobLauncher" value-ref="jobLauncher"/>
+			</map>
+		</property>
+	</bean>
+	<bean id="cronTrigger" class="org.springframework.scheduling.quartz.CronTriggerBean">
+		<property name="jobDetail" ref="jobDetail" />
+		<property name="misfireInstructionName" value="MISFIRE_INSTRUCTION_DO_NOTHING"/>
+		<property name="cronExpression" value="0 0/2  * * * ?" />
+	</bean>
+	
+	<bean id="outboundCronTrigger" class="org.springframework.scheduling.quartz.CronTriggerBean">
+		<property name="jobDetail" ref="ouboundJobDetail" />
+		<property name="misfireInstructionName" value="MISFIRE_INSTRUCTION_DO_NOTHING"/>
+		<property name="cronExpression" value="0/18 * * * * ?" />
+	</bean>
+	
+	
+
+	
+	
+</beans>

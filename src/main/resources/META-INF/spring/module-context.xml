@@ -1,0 +1,229 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<beans xmlns="http://www.springframework.org/schema/beans"
+	xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+	xmlns:util="http://www.springframework.org/schema/util" 
+    xmlns:batch="http://www.springframework.org/schema/batch"
+	xsi:schemaLocation="
+	http://www.springframework.org/schema/batch http://www.springframework.org/schema/batch/spring-batch-2.2.xsd
+	http://www.springframework.org/schema/util http://www.springframework.org/schema/util/spring-util-3.0.xsd
+	http://www.springframework.org/schema/beans http://www.springframework.org/schema/beans/spring-beans-3.0.xsd">
+
+	<description>Example job to get you started. It provides a skeleton for a typical batch application.</description>
+ 	<!--<import resource="classpath:rabbitmq-beans.xml" />
+ 	<import resource="classpath:config-beans.xml"/>
+	  <batch:job id="eod_job">
+		<batch:step id="eod_step"  >			
+			<batch:tasklet transaction-manager="transactionManager"  >
+				<batch:chunk reader="reader" writer="writer" commit-interval="1" />
+			</batch:tasklet>
+		</batch:step>
+	</batch:job> 
+	
+	<batch:job id="eod_job">
+		<batch:step id="staging" next="loading">
+			<batch:tasklet>
+				<batch:chunk reader="eodItemXmlReader" 
+				       writer="stagingItemWriter" 
+				       commit-interval="20"/>
+				<batch:transaction-attributes isolation="READ_COMMITTED" 
+                                propagation="REQUIRED" />
+			</batch:tasklet>
+		</batch:step>
+		<batch:step id="loading">
+			<batch:tasklet throttle-limit="4" task-executor="taskExecutor">
+				<batch:chunk reader="stagingReader" 
+			           processor="stagingProcessor" 
+			           writer="accountHistoryWriter" 
+			           commit-interval="100" >		    
+			    </batch:chunk>
+			    <batch:transaction-attributes isolation="READ_COMMITTED" 
+                                propagation="REQUIRED"/>
+			</batch:tasklet>
+		</batch:step>
+	</batch:job> -->
+  
+  
+  <batch:job id="outbound-pofeed-job" restartable="true" incrementer="incrementer" xmlns="http://www.springframework.org/schema/batch" >
+		<batch:step id="loading" next="skipCheckingDecision2">
+			<batch:tasklet>
+				<batch:chunk reader="stagingReader" processor="outboundProcessor"
+					writer="outboundWriter" commit-interval="10" skip-limit="1000" retry-limit="20">
+					<skippable-exception-classes>
+						<include class="com.hliang.batch.eod.exceptions.EODSkippableException" />
+					</skippable-exception-classes>
+					<retryable-exception-classes>
+				    	<include class="com.hliang.batch.eod.exceptions.POFRetryableException"/>
+				    	<include class="org.springframework.dao.DeadlockLoserDataAccessException"/>
+				    </retryable-exception-classes>
+				</batch:chunk>
+				<batch:transaction-attributes isolation="READ_COMMITTED"  propagation="REQUIRED" />
+			</batch:tasklet>
+		</batch:step>
+		<batch:decision id="skipCheckingDecision2" decider="skipCheckingDecider">
+			<batch:end on="*" />
+			<batch:fail on="FAILED" exit-code="FAILED" />
+		</batch:decision>
+	</batch:job>
+  
+  
+  
+  
+	<batch:job id="pofeed-job" incrementer="incrementer" xmlns="http://www.springframework.org/schema/batch" >
+
+		<batch:step id="processFile" parent="baseStep" next="skipCheckingDecision">
+			<batch:tasklet>
+				<batch:chunk reader="multiResourceReader" processor="stagingProcessor"
+					writer="poStageItemWriter" commit-interval="10" skip-limit="1000" retry-limit="5">
+					<skippable-exception-classes>
+						<include
+							class="org.springframework.batch.item.file.FlatFileParseException" />
+						<include class="org.springframework.batch.item.WriteFailedException" />
+						<include class="com.hliang.batch.eod.exceptions.EODSkippableException" />
+					</skippable-exception-classes>
+					<retryable-exception-classes>
+				    	<include class="com.hliang.batch.eod.exceptions.POFRetryableException"/>
+				    	<include class="org.springframework.dao.DeadlockLoserDataAccessException"/>
+				    </retryable-exception-classes>
+				</batch:chunk>
+				<batch:transaction-attributes isolation="READ_COMMITTED"  propagation="REQUIRED" />
+			</batch:tasklet>
+		</batch:step>
+
+		<batch:step id="errorPrint1" next="deleteFilesInDir">
+			<batch:tasklet ref="errorLogTasklet" />
+		</batch:step>
+		
+		<batch:step id="deleteFilesInDir">
+       <batch:tasklet ref="fileDeletingTasklet"/>
+    </batch:step>
+
+		<batch:decision id="skipCheckingDecision" decider="skipCheckingDecider">
+			<batch:next on="COMPLETED" to="deleteFilesInDir" />
+			<batch:next on="COMPLETED WITH SKIPS" to="errorPrint1" />
+			<batch:fail on="FAILED" exit-code="FAILED" />
+		</batch:decision>
+
+	</batch:job>
+	
+	
+	<batch:step id="baseStep" abstract="true"
+		xmlns="http://www.springframework.org/schema/batch">
+		<batch:tasklet>
+			<batch:listeners>
+				<batch:listener>
+					<bean class="com.hliang.batch.eod.SkipCheckingListener"
+						xmlns="http://www.springframework.org/schema/beans">
+						<property name="resource" value="${batch.output.failed}" />
+					</bean>
+				</batch:listener>
+				<batch:listener>
+					<bean
+						class="org.springframework.batch.core.listener.ExecutionContextPromotionListener"
+						xmlns="http://www.springframework.org/schema/beans">
+						<property name="keys">
+							<list>
+								<value>stepName</value>
+							</list>
+						</property>
+					</bean>
+				</batch:listener>
+			</batch:listeners>
+		</batch:tasklet>
+	</batch:step>
+	<bean id="errorLogTasklet" class="com.hliang.batch.common.ErrorLogTasklet"
+		scope="step">
+		<property name="resource" value="${batch.output.log}" />
+
+	</bean>
+  <bean id="fileDeletingTasklet" 
+            class="com.hliang.batch.common.FileDeletingTasklet">
+    <property name="directoryResource">
+        <bean id="directory" 
+                    class="org.springframework.core.io.FileSystemResource">
+            <constructor-arg value="${batch.input.dir}" />
+        </bean>
+    </property>
+  </bean>
+  
+	<bean id="skipCheckingDecider" class="com.hliang.batch.common.SkipCheckingDecider" />
+
+	<bean id="incrementer"
+		class="org.springframework.batch.core.launch.support.RunIdIncrementer" />
+
+
+	<bean
+		class="org.springframework.batch.core.configuration.support.JobRegistryBeanPostProcessor">
+		<property name="jobRegistry" ref="jobRegistry" />
+	</bean>
+	<bean id="multiResourceReader"
+		class=" org.springframework.batch.item.file.MultiResourceItemReader"
+		scope="step">
+		<property name="resources" value="${batch.input.file}" /> <!--  ref="fileInputLocator" /> -->
+		<property name="delegate" ref="poItemReader" />
+	</bean>
+	<bean id="poItemReader" class="org.springframework.batch.item.file.FlatFileItemReader">
+		<property name="lineMapper">
+			<bean class="org.springframework.batch.item.file.mapping.DefaultLineMapper">
+				<property name="lineTokenizer">
+					<bean
+						class="org.springframework.batch.item.file.transform.DelimitedLineTokenizer">
+						<property name="delimiter">
+							<util:constant
+								static-field="org.springframework.batch.item.file.transform.DelimitedLineTokenizer.DELIMITER_TAB" />
+						</property>
+						<property name="names"
+							value="name1,name2,name3,name4,name5,name6,name7,name8,name9,name10,name11,name12,name13,name14,name15,name16,name17,name18,name19,name20,name21,name22,name23,name24,name25,name26,name27,name28,name29,name30,name31,name32,name33,name34,name35,name36,name37,name38,name39,name40,name41,name42,name43" />
+					</bean>
+				</property>
+				<property name="fieldSetMapper">
+					<bean
+						class="org.springframework.batch.item.file.mapping.BeanWrapperFieldSetMapper">
+						<property name="targetType" value="com.hliang.batch.eod.model.ProductFeed" />
+					</bean>
+				</property>
+			</bean>
+		</property>
+		<!-- <property name="resource" ref="fileInputLocator" /> -->
+	</bean>
+	<bean id="poFeedProcessor" class="com.hliang.batch.eod.ProductFeedItemProcessor" />
+
+	<bean id="poFeedItemWriter" class="com.hliang.batch.eod.ProductFeedItemWriter">
+		<property name="resource" value="${batch.output.success}" />
+	</bean>
+	<bean id="fileInputLocator" class="org.springframework.core.io.FileSystemResource">
+		<constructor-arg type="java.lang.String" value="${batch.input.file}" />
+	</bean>
+	<bean id="stagingProcessor" class="com.hliang.batch.eod.ProductFeedStageItemProcessor">
+		<property name="dataSource" ref="dataSource" />
+	</bean>   
+  <bean id="poStageItemWriter" class="com.hliang.batch.eod.ProductFeedStageItemWriter">
+		<property name="dataSource" ref="dataSource" />
+		<property name="incrementer">
+			<bean parent="incrementerParent">
+				<property name="incrementerName" value="BATCH_STAGING_SEQ" />
+			</bean>
+		</property>
+	</bean>  
+  <bean id="stagingReader" class="com.hliang.batch.eod.StagingItemReader">
+		<property name="dataSource" ref="dataSource" />
+	</bean>  
+	<bean id="outboundProcessor" class="com.hliang.batch.eod.StagingItemProcessor">
+		<property name="dataSource" ref="dataSource" />
+	</bean>
+	<bean id="outboundWriter" class="com.hliang.batch.eod.POFOutboundServiceInvoker" >
+		<property name="outboundServices" ref="outboundServices" />
+	</bean>
+	
+	<bean id="outboundServices" class="com.hliang.batch.service.POFOutboundServicesImpl" />
+
+  <!--  
+    <bean id="taskExecutor" class="org.springframework.core.task.SimpleAsyncTaskExecutor" >  
+    	<property name="concurrencyLimit" value="10"/>
+    </bean>
+
+	
+
+
+	
+	-->
+</beans>
